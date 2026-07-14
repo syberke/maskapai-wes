@@ -3,11 +3,11 @@
 namespace App\Http\Controllers\Manager;
 
 use App\Http\Controllers\Controller;
+use App\Models\Airline;
 use App\Models\Booking;
 use App\Models\Flight;
-use App\Models\Airline;
 use App\Models\Passenger;
-use Illuminate\Http\Request;
+use App\Support\SqlDateExpression;
 use Illuminate\View\View;
 
 class ReportController extends Controller
@@ -19,8 +19,12 @@ class ReportController extends Controller
         $monthly = Booking::where('status', 'confirmed')->whereMonth('created_at', now()->month)->whereYear('created_at', now()->year)->sum('total_price');
         $yearly = Booking::where('status', 'confirmed')->whereYear('created_at', now()->year)->sum('total_price');
 
-        $monthlyData = Booking::selectRaw('MONTH(created_at) as month, SUM(total_price) as total')
-            ->where('status', 'confirmed')->whereYear('created_at', date('Y'))->groupBy('month')->pluck('total', 'month');
+        $monthExpression = SqlDateExpression::month();
+        $monthlyData = Booking::selectRaw("{$monthExpression} as month, SUM(total_price) as total")
+            ->where('status', 'confirmed')
+            ->whereYear('created_at', date('Y'))
+            ->groupByRaw($monthExpression)
+            ->pluck('total', 'month');
 
         $recentTransactions = Booking::with(['flight.departureAirport', 'flight.arrivalAirport', 'user'])
             ->where('status', 'confirmed')->latest()->take(10)->get();
@@ -34,9 +38,12 @@ class ReportController extends Controller
         $confirmed = Booking::where('status', 'confirmed')->count();
         $pending = Booking::where('status', 'pending')->count();
         $cancelled = Booking::where('status', 'cancelled')->count();
-        
-        $monthlyBookings = Booking::selectRaw('MONTH(created_at) as month, COUNT(*) as total')
-            ->whereYear('created_at', date('Y'))->groupBy('month')->pluck('total', 'month');
+
+        $monthExpression = SqlDateExpression::month();
+        $monthlyBookings = Booking::selectRaw("{$monthExpression} as month, COUNT(*) as total")
+            ->whereYear('created_at', date('Y'))
+            ->groupByRaw($monthExpression)
+            ->pluck('total', 'month');
 
         $recentBookings = Booking::with(['flight.departureAirport', 'flight.arrivalAirport', 'user'])->latest()->take(15)->get();
 
@@ -97,8 +104,8 @@ class ReportController extends Controller
 
     public function routePerformance(): View
     {
-        $routes = Flight::selectRaw('CONCAT(departure_airport_id, "-", arrival_airport_id) as route_code, departure_airport_id, arrival_airport_id, COUNT(*) as total_flights')
-            ->groupBy('route_code', 'departure_airport_id', 'arrival_airport_id')
+        $routes = Flight::selectRaw('departure_airport_id, arrival_airport_id, COUNT(*) as total_flights')
+            ->groupBy('departure_airport_id', 'arrival_airport_id')
             ->orderByDesc('total_flights')
             ->get()
             ->map(function ($item) {
