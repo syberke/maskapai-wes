@@ -3,11 +3,10 @@
 namespace App\Http\Controllers\Manager;
 
 use App\Http\Controllers\Controller;
+use App\Models\Airline;
 use App\Models\Booking;
 use App\Models\Flight;
-use App\Models\Airline;
-use App\Models\Passenger;
-use Illuminate\Http\Request;
+use App\Support\SqlDateExpression;
 use Illuminate\View\View;
 
 class AnalyticsController extends Controller
@@ -55,17 +54,21 @@ class AnalyticsController extends Controller
         }
 
         // Top Routes
-        $topRoutes = Flight::selectRaw('CONCAT(departure_airport_id, "-", arrival_airport_id) as route, COUNT(*) as total')
-            ->groupBy('route')
+        $topRoutes = Flight::selectRaw('departure_airport_id, arrival_airport_id, COUNT(*) as total')
+            ->groupBy('departure_airport_id', 'arrival_airport_id')
             ->orderByDesc('total')
             ->take(5)
-            ->get();
+            ->get()
+            ->each(function ($route) {
+                $route->route = $route->departure_airport_id . '-' . $route->arrival_airport_id;
+            });
 
         // Monthly revenue chart data
-        $monthlyRevenueData = Booking::selectRaw('MONTH(created_at) as month, SUM(total_price) as total')
+        $monthExpression = SqlDateExpression::month();
+        $monthlyRevenueData = Booking::selectRaw("{$monthExpression} as month, SUM(total_price) as total")
             ->where('status', 'confirmed')
             ->whereYear('created_at', date('Y'))
-            ->groupBy('month')
+            ->groupByRaw($monthExpression)
             ->pluck('total', 'month');
 
         return view('manager.analytics', compact(
