@@ -170,7 +170,9 @@ class FlightController extends Controller
         $departure = Carbon::parse($departureTime);
         $arrival = Carbon::parse($arrivalTime);
         $totalMinutes = (int) $departure->diffInMinutes($arrival);
+        $hours = intdiv($totalMinutes, 60);
+        $minutes = $totalMinutes % 60;
 
-        return intdiv($totalMinutes, 60) . ' Jam ' . ($totalMinutes % 60) . ' Menit';
+        return sprintf('%dh %02dm', $hours, $minutes);
     }
 }
