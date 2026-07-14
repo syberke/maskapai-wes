@@ -1,0 +1,14 @@
+@extends('layouts.admin')
+@section('title', 'Edit Pesawat')
+@section('content')
+<div class="max-w-2xl mx-auto"><div class="bg-zinc-900 border border-zinc-800 rounded-xl p-8"><h2 class="text-xl font-semibold text-white mb-6">Edit Pesawat</h2>
+<form method="POST" action="{{ route('admin.airplanes.update', $airplane) }}" class="space-y-6">@csrf @method('PUT')
+<div><label class="block text-sm font-medium text-zinc-300 mb-2">Maskapai</label><select name="airline_id" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2.5 text-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500" required>@foreach($airlines as $al)<option value="{{ $al->id }}" {{ old('airline_id',$airplane->airline_id)==$al->id?'selected':'' }}>{{ $al->name }}</option>@endforeach</select></div>
+<div class="grid grid-cols-2 gap-4"><div><label class="block text-sm font-medium text-zinc-300 mb-2">Model</label><input type="text" name="model" value="{{ old('model', $airplane->model) }}" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2.5 text-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500" required></div>
+<div><label class="block text-sm font-medium text-zinc-300 mb-2">Registrasi</label><input type="text" name="registration_number" value="{{ old('registration_number', $airplane->registration_number) }}" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2.5 text-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500"></div></div>
+<div class="grid grid-cols-2 gap-4"><div><label class="block text-sm font-medium text-zinc-300 mb-2">Kapasitas</label><input type="number" name="capacity" value="{{ old('capacity', $airplane->capacity) }}" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2.5 text-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500" required></div>
+<div><label class="block text-sm font-medium text-zinc-300 mb-2">Foto URL</label><input type="url" name="photos" value="{{ old('photos', $airplane->photos) }}" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2.5 text-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500"></div></div>
+<div><label class="block text-sm font-medium text-zinc-300 mb-2">Deskripsi</label><textarea name="description" rows="3" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2.5 text-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500">{{ old('description', $airplane->description) }}</textarea></div>
+<div class="flex gap-3"><button type="submit" class="px-6 py-2.5 bg-amber-500 text-black rounded-lg font-semibold hover:bg-amber-600 transition">Update</button><a href="{{ route('admin.airplanes.index') }}" class="px-6 py-2.5 bg-zinc-800 text-zinc-300 rounded-lg hover:bg-zinc-700 transition">Batal</a></div>
+</form></div></div>
+@endsection
