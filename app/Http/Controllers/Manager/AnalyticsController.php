@@ -11,62 +11,43 @@ use Illuminate\View\View;
 
 class AnalyticsController extends Controller
 {
+    private const COMPLETED = ['paid', 'issued'];
+
     public function index(): View
     {
-        // Revenue Analytics
-        $dailyRevenue = Booking::where('status', 'confirmed')
-            ->whereDate('created_at', today())
-            ->sum('total_price');
+        $completed = fn () => Booking::whereIn('status', self::COMPLETED);
+        $dailyRevenue = $completed()->whereDate('created_at', today())->sum('total_price');
+        $weeklyRevenue = $completed()->whereBetween('created_at', [now()->startOfWeek(), now()->endOfWeek()])->sum('total_price');
+        $monthlyRevenue = $completed()->whereMonth('created_at', now()->month)->whereYear('created_at', now()->year)->sum('total_price');
 
-        $weeklyRevenue = Booking::where('status', 'confirmed')
-            ->whereBetween('created_at', [now()->startOfWeek(), now()->endOfWeek()])
-            ->sum('total_price');
-
-        $monthlyRevenue = Booking::where('status', 'confirmed')
-            ->whereMonth('created_at', now()->month)
-            ->whereYear('created_at', now()->year)
-            ->sum('total_price');
-
-        // Booking Analytics
         $totalBookings = Booking::count();
-        $confirmedBookings = Booking::where('status', 'confirmed')->count();
-        $cancelledBookings = Booking::where('status', 'cancelled')->count();
+        $confirmedBookings = Booking::whereIn('status', self::COMPLETED)->count();
+        $cancelledBookings = Booking::whereIn('status', ['cancelled', 'refunded'])->count();
         $successRate = $totalBookings > 0 ? round(($confirmedBookings / $totalBookings) * 100, 2) : 0;
         $cancellationRate = $totalBookings > 0 ? round(($cancelledBookings / $totalBookings) * 100, 2) : 0;
 
-        // Occupancy Rate per Airline
-        $airlines = Airline::withCount(['flights', 'airplanes'])->get();
-        $occupancyData = [];
-        foreach ($airlines as $airline) {
+        $occupancyData = Airline::withCount(['flights', 'airplanes'])->get()->map(function (Airline $airline): array {
             $totalSeats = $airline->airplanes()->sum('capacity');
-            $bookedSeats = Booking::whereHas('flight', function($q) use ($airline) {
-                $q->where('airline_id', $airline->id);
-            })->where('status', 'confirmed')->sum('total_passengers');
-            $occupancyRate = $totalSeats > 0 ? round(($bookedSeats / $totalSeats) * 100, 2) : 0;
-            $occupancyData[] = [
+            $completed = Booking::whereHas('flight', fn ($query) => $query->where('airline_id', $airline->id))
+                ->whereIn('status', self::COMPLETED);
+            $bookedSeats = (clone $completed)->sum('total_passengers');
+
+            return [
                 'name' => $airline->name,
                 'total_flights' => $airline->flights_count,
-                'occupancy_rate' => $occupancyRate,
-                'revenue' => Booking::whereHas('flight', function($q) use ($airline) {
-                    $q->where('airline_id', $airline->id);
-                })->where('status', 'confirmed')->sum('total_price'),
+                'occupancy_rate' => $totalSeats > 0 ? round(($bookedSeats / $totalSeats) * 100, 2) : 0,
+                'revenue' => (clone $completed)->sum('total_price'),
             ];
-        }
+        })->all();
 
-        // Top Routes
         $topRoutes = Flight::selectRaw('departure_airport_id, arrival_airport_id, COUNT(*) as total')
             ->groupBy('departure_airport_id', 'arrival_airport_id')
-            ->orderByDesc('total')
-            ->take(5)
-            ->get()
-            ->each(function ($route) {
-                $route->route = $route->departure_airport_id . '-' . $route->arrival_airport_id;
-            });
+            ->orderByDesc('total')->take(5)->get()
+            ->each(fn ($route) => $route->route = $route->departure_airport_id . '-' . $route->arrival_airport_id);
 
-        // Monthly revenue chart data
         $monthExpression = SqlDateExpression::month();
         $monthlyRevenueData = Booking::selectRaw("{$monthExpression} as month, SUM(total_price) as total")
-            ->where('status', 'confirmed')
+            ->whereIn('status', self::COMPLETED)
             ->whereYear('created_at', date('Y'))
             ->groupByRaw($monthExpression)
             ->pluck('total', 'month');

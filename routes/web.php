@@ -28,6 +28,7 @@ use App\Http\Controllers\Staff\FlightMonitoringController;
 
 use App\Http\Controllers\Manager\AnalyticsController;
 use App\Http\Controllers\Manager\ReportController;
+use App\Http\Controllers\Manager\ReportExportController;
 
 Route::get('/', [LandingPageController::class, 'index'])->name('homepage');
 Route::get('/flights/search', [FlightSearchController::class, 'search'])->name('flights.search');
@@ -81,6 +82,8 @@ Route::middleware(['auth', 'verified', 'role:manager'])->prefix('manager')->name
         Route::get('/occupancy', [ReportController::class, 'occupancy'])->name('occupancy');
         Route::get('/airline-performance', [ReportController::class, 'airlinePerformance'])->name('airline-performance');
         Route::get('/route-performance', [ReportController::class, 'routePerformance'])->name('route-performance');
+        Route::get('/{report}/export/pdf', [ReportExportController::class, 'pdf'])->name('export.pdf');
+        Route::get('/{report}/export/excel', [ReportExportController::class, 'excel'])->name('export.excel');
     });
 });
 
