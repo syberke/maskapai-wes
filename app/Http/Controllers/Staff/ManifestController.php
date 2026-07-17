@@ -20,10 +20,10 @@ class ManifestController extends Controller
     public function index(): View
     {
         $flights = Flight::with(['airline', 'departureAirport', 'arrivalAirport'])
-            ->withCount(['bookings as manifest_passengers_count' => function ($query) {
-                $query->whereIn('status', self::MANIFEST_BOOKING_STATUSES)
-                    ->selectRaw('COALESCE(SUM(total_passengers), 0)');
-            }])
+            ->withSum([
+                'bookings as manifest_passengers_count' => fn ($query) =>
+                    $query->whereIn('status', self::MANIFEST_BOOKING_STATUSES),
+            ], 'total_passengers')
             ->where('departure_time', '>=', now()->subHours(6))
             ->orderBy('departure_time')
             ->paginate(10);
@@ -33,9 +33,7 @@ class ManifestController extends Controller
 
     public function show(Flight $flight): View
     {
-        $data = $this->manifestData($flight);
-
-        return view('staff.manifest.show', $data);
+        return view('staff.manifest.show', $this->manifestData($flight));
     }
 
     public function pdf(Flight $flight): Response
