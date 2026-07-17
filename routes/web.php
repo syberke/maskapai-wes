@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ProfileController;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
@@ -21,6 +22,7 @@ use App\Http\Controllers\Customer\DashboardController as CustomerDashboardContro
 use App\Http\Controllers\Customer\BookingController;
 use App\Http\Controllers\Customer\PaymentController;
 use App\Http\Controllers\Customer\MidtransController;
+use App\Http\Controllers\Customer\EticketController;
 
 use App\Http\Controllers\Staff\DashboardController as StaffDashboardController;
 use App\Http\Controllers\Staff\ManifestController;
@@ -33,6 +35,10 @@ use App\Http\Controllers\Manager\ReportExportController;
 Route::get('/', [LandingPageController::class, 'index'])->name('homepage');
 Route::get('/flights/search', [FlightSearchController::class, 'search'])->name('flights.search');
 
+Route::post('/customer/midtrans/callback', [MidtransController::class, 'callback'])
+    ->withoutMiddleware([PreventRequestForgery::class])
+    ->name('customer.midtrans.callback');
+
 Route::middleware(['auth', 'verified'])->prefix('customer')->name('customer.')->group(function () {
     Route::get('/dashboard', [CustomerDashboardController::class, 'index'])->name('dashboard');
     Route::get('/flights/{flight}/seats', [BookingController::class, 'selectSeats'])->name('flights.seats');
@@ -44,9 +50,9 @@ Route::middleware(['auth', 'verified'])->prefix('customer')->name('customer.')->
     Route::get('/payments/{booking}', [PaymentController::class, 'show'])->name('payment.show');
     Route::post('/payments/{booking}/process', [PaymentController::class, 'process'])->name('payment.process');
     Route::get('/payments/{booking}/success', [PaymentController::class, 'success'])->name('payment.success');
-    Route::get('/eticket/{booking}', [PaymentController::class, 'eticket'])->name('eticket');
+    Route::get('/eticket/{booking}', [EticketController::class, 'show'])->name('eticket');
+    Route::get('/eticket/{booking}/pdf', [EticketController::class, 'pdf'])->name('eticket.pdf');
     Route::post('/midtrans/pay/{booking}', [MidtransController::class, 'pay'])->name('midtrans.pay');
-    Route::post('/midtrans/callback', [MidtransController::class, 'callback'])->name('midtrans.callback');
 });
 
 Route::middleware(['auth', 'verified', 'role:admin'])->prefix('admin')->name('admin.')->group(function () {
@@ -70,6 +76,8 @@ Route::middleware(['auth', 'verified', 'role:staff'])->prefix('staff')->name('st
     Route::get('/dashboard', [StaffDashboardController::class, 'index'])->name('dashboard');
     Route::get('/manifest', [ManifestController::class, 'index'])->name('manifest');
     Route::get('/manifest/{flight}', [ManifestController::class, 'show'])->name('manifest.show');
+    Route::get('/manifest/{flight}/pdf', [ManifestController::class, 'pdf'])->name('manifest.pdf');
+    Route::get('/manifest/{flight}/excel', [ManifestController::class, 'excel'])->name('manifest.excel');
     Route::get('/flights', [FlightMonitoringController::class, 'index'])->name('flights');
 });
 

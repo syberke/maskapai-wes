@@ -4,167 +4,93 @@ namespace App\Http\Controllers\Customer;
 
 use App\Http\Controllers\Controller;
 use App\Models\Booking;
+use App\Models\Flight;
 use App\Services\MidtransService;
-use Illuminate\Http\Request;
-use Illuminate\View\View;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\View\View;
 
 class PaymentController extends Controller
 {
-    public function __construct(private MidtransService $midtrans) {}
+    private const ACTIVE_BOOKING_STATUSES = ['pending', 'paid', 'issued'];
+
+    public function __construct(private MidtransService $midtrans)
+    {
+    }
 
     public function index(Request $request): View
     {
         $user = auth()->user();
-        
-        // Base query with relationships
         $query = Booking::with(['flight.departureAirport', 'flight.arrivalAirport', 'flight.airline', 'payment', 'passengers'])
-            ->where('user_id', $user->id)
-            ->latest();
-        
-        // Search functionality
-        if ($request->has('search') && $request->search) {
+            ->where('user_id', $user->id);
+
+        if ($request->filled('search')) {
             $search = $request->search;
-            $query->where(function($q) use ($search) {
-                $q->where('booking_code', 'like', "%{$search}%")
-                  ->orWhereHas('flight', function($flight) use ($search) {
-                      $flight->where('flight_number', 'like', "%{$search}%");
-                  })
-                  ->orWhereHas('passengers', function($p) use ($search) {
-                      $p->where('full_name', 'like', "%{$search}%");
-                  });
+            $query->where(function ($bookingQuery) use ($search) {
+                $bookingQuery->where('booking_code', 'like', "%{$search}%")
+                    ->orWhereHas('flight', fn ($flightQuery) => $flightQuery->where('flight_number', 'like', "%{$search}%"))
+                    ->orWhereHas('passengers', fn ($passengerQuery) => $passengerQuery->where('full_name', 'like', "%{$search}%"));
             });
         }
-        
-        // Filter by payment status
-        if ($request->has('status') && $request->status) {
-            $status = $request->status;
-            if ($status === 'pending') {
-                $query->whereHas('payment', function($q) {
-                    $q->where('payment_status', 'pending');
-                });
-            } elseif ($status === 'paid') {
-                $query->whereHas('payment', function($q) {
-                    $q->where('payment_status', 'paid');
-                });
-            } elseif ($status === 'failed') {
-                $query->whereHas('payment', function($q) {
-                    $q->whereIn('payment_status', ['failed', 'expired']);
-                });
-            } elseif ($status === 'refunded') {
-                $query->whereHas('payment', function($q) {
-                    $q->where('payment_status', 'refunded');
-                });
+
+        if ($request->filled('status')) {
+            $paymentStatuses = match ($request->status) {
+                'pending' => ['pending'],
+                'paid' => ['paid'],
+                'failed' => ['failed', 'expired'],
+                'refunded' => ['refunded'],
+                default => [],
+            };
+
+            if ($paymentStatuses !== []) {
+                $query->whereHas('payment', fn ($paymentQuery) => $paymentQuery->whereIn('payment_status', $paymentStatuses));
             }
         }
-        
-        // Sorting
-        if ($request->has('sort')) {
-            switch ($request->sort) {
-                case 'oldest':
-                    $query->oldest();
-                    break;
-                case 'price_high':
-                    $query->orderByDesc('total_price');
-                    break;
-                case 'price_low':
-                    $query->orderBy('total_price');
-                    break;
-                default:
-                    $query->latest();
-            }
-        } else {
-            $query->latest();
-        }
-        
+
+        match ($request->input('sort')) {
+            'oldest' => $query->oldest(),
+            'price_high' => $query->orderByDesc('total_price'),
+            'price_low' => $query->orderBy('total_price'),
+            default => $query->latest(),
+        };
+
         $bookings = $query->paginate(10)->withQueryString();
-        
-        // Statistics
         $stats = [
             'total' => Booking::where('user_id', $user->id)->count(),
-            'pending' => Booking::where('user_id', $user->id)->whereHas('payment', function($q) {
-                $q->where('payment_status', 'pending');
-            })->count(),
-            'paid' => Booking::where('user_id', $user->id)->whereHas('payment', function($q) {
-                $q->where('payment_status', 'paid');
-            })->count(),
-            'failed' => Booking::where('user_id', $user->id)->whereHas('payment', function($q) {
-                $q->whereIn('payment_status', ['failed', 'expired']);
-            })->count(),
-            'refunded' => Booking::where('user_id', $user->id)->whereHas('payment', function($q) {
-                $q->where('payment_status', 'refunded');
-            })->count(),
+            'pending' => $this->paymentCount($user->id, ['pending']),
+            'paid' => $this->paymentCount($user->id, ['paid']),
+            'failed' => $this->paymentCount($user->id, ['failed', 'expired']),
+            'refunded' => $this->paymentCount($user->id, ['refunded']),
         ];
-        
+
         return view('customer.payments.index', compact('bookings', 'stats'));
     }
 
     public function show(Booking $booking): View
     {
-        if ($booking->user_id !== auth()->id()) {
-            abort(403);
-        }
-
-        $booking->load(['flight.departureAirport', 'flight.arrivalAirport', 'flight.airline', 'payment', 'passengers']);
-
-        // If status check is requested via AJAX
-        if (request()->has('check_status')) {
-            return view('customer.payment.show', compact('booking'));
-        }
+        $this->authorizeBooking($booking);
+        $booking->load(['flight.departureAirport', 'flight.arrivalAirport', 'flight.airline', 'payment', 'passengers.seat']);
 
         return view('customer.payment.show', compact('booking'));
     }
 
     public function success(Booking $booking): View
     {
-        if ($booking->user_id !== auth()->id()) {
-            abort(403);
-        }
-
-        // Refresh booking from database to get latest status
-        $booking->refresh();
+        $this->authorizeBooking($booking);
         $booking->load(['flight.departureAirport', 'flight.arrivalAirport', 'flight.airline', 'flight.airplane', 'passengers.seat', 'payment']);
-        
-        // If booking still shows pending, try to check Midtrans status
+
         if ($booking->status === 'pending' && $booking->payment) {
             try {
-                $orderId = 'LXF-' . $booking->booking_code;
-                $transactionStatus = $this->midtrans->getTransactionStatus($orderId);
-                
-                if (!empty($transactionStatus) && isset($transactionStatus['transaction_status'])) {
-                    $status = $transactionStatus['transaction_status'];
-                    $fraudStatus = $transactionStatus['fraud_status'] ?? null;
-                    
-                    // Map statuses
-                    $paymentStatusMap = [
-                        'capture' => 'paid', 'settlement' => 'paid',
-                        'pending' => 'pending', 'deny' => 'failed',
-                        'expire' => 'expired', 'cancel' => 'failed',
-                        'refund' => 'refunded', 'partial_refund' => 'refunded'
-                    ];
-                    
-                    $bookingStatusMap = [
-                        'capture' => 'issued', 'settlement' => 'issued',
-                        'pending' => 'pending', 'deny' => 'cancelled',
-                        'expire' => 'cancelled', 'cancel' => 'cancelled',
-                        'refund' => 'refunded', 'partial_refund' => 'refunded'
-                    ];
-                    
-                    if (in_array($status, ['capture', 'settlement'])) {
-                        $booking->payment->update([
-                            'payment_status' => 'paid',
-                            'midtrans_transaction_status' => $status,
-                            'settlement_time' => $transactionStatus['settlement_time'] ?? now(),
-                        ]);
-                        $booking->update(['status' => 'issued']);
-                        $booking->refresh();
-                    }
+                // booking_code already contains LXF-. This must match the Midtrans order_id exactly.
+                $transaction = $this->midtrans->getTransactionStatus($booking->booking_code);
+
+                if (! empty($transaction['transaction_status'])) {
+                    $this->synchronizeGatewayStatus($booking, $transaction);
+                    $booking->refresh()->load(['flight.departureAirport', 'flight.arrivalAirport', 'flight.airline', 'flight.airplane', 'passengers.seat', 'payment']);
                 }
-            } catch (\Exception $e) {
-                \Log::error('Status check failed on success page', [
-                    'booking_id' => $booking->id,
-                    'error' => $e->getMessage()
-                ]);
+            } catch (\Throwable $exception) {
+                report($exception);
             }
         }
 
@@ -173,16 +99,13 @@ class PaymentController extends Controller
 
     public function process(Request $request, Booking $booking): RedirectResponse
     {
-        if ($booking->user_id !== auth()->id()) {
-            abort(403);
-        }
+        $this->authorizeBooking($booking);
 
         if ($booking->status !== 'pending') {
             return back()->with('error', 'Pembayaran sudah diproses sebelumnya.');
         }
 
-        // Verify payment exists
-        if (!$booking->payment) {
+        if (! $booking->payment) {
             return back()->with('error', 'Payment record not found. Please contact support.');
         }
 
@@ -190,32 +113,91 @@ class PaymentController extends Controller
             'payment_method' => ['required', 'string', 'in:bank_transfer,credit_card,e_wallet'],
         ]);
 
-        // Update payment method
-        $booking->payment->update([
-            'payment_method' => $validated['payment_method'],
-        ]);
+        $booking->payment->update(['payment_method' => $validated['payment_method']]);
 
-        \Log::info('Payment method selected', [
-            'booking_id' => $booking->id,
-            'payment_method' => $validated['payment_method']
-        ]);
-
-        // Redirect to Midtrans pay route which will generate Snap token
-        return redirect()->route('customer.midtrans.pay', $booking->id)
+        return redirect()->route('customer.midtrans.pay', $booking)
             ->with('success', 'Metode pembayaran dipilih. Silakan selesaikan pembayaran.');
     }
 
-    public function eticket(Booking $booking): View
+    public function eticket(Booking $booking): View|RedirectResponse
+    {
+        $this->authorizeBooking($booking);
+
+        if (! in_array($booking->status, ['issued', 'paid'], true)) {
+            return back()->with('error', 'E-Ticket hanya tersedia untuk booking yang sudah dikonfirmasi.');
+        }
+
+        $booking->load(['flight.departureAirport', 'flight.arrivalAirport', 'flight.airline', 'flight.airplane', 'passengers.seat', 'payment']);
+
+        return view('customer.bookings.eticket', compact('booking'));
+    }
+
+    private function synchronizeGatewayStatus(Booking $booking, array $transaction): void
+    {
+        $gatewayStatus = (string) $transaction['transaction_status'];
+        $fraudStatus = $transaction['fraud_status'] ?? null;
+        $paymentStatus = match ($gatewayStatus) {
+            'capture', 'settlement' => 'paid',
+            'deny', 'cancel' => 'failed',
+            'expire' => 'expired',
+            'refund', 'partial_refund' => 'refunded',
+            default => 'pending',
+        };
+        $bookingStatus = match ($gatewayStatus) {
+            'capture', 'settlement' => $fraudStatus === 'challenge' ? 'paid' : 'issued',
+            'deny', 'expire', 'cancel' => 'cancelled',
+            'refund', 'partial_refund' => 'refunded',
+            default => 'pending',
+        };
+        $settlementTime = in_array($gatewayStatus, ['capture', 'settlement'], true)
+            ? ($transaction['settlement_time'] ?? now())
+            : null;
+
+        DB::transaction(function () use ($booking, $transaction, $gatewayStatus, $fraudStatus, $paymentStatus, $bookingStatus, $settlementTime): void {
+            $lockedBooking = Booking::query()->lockForUpdate()->findOrFail($booking->id);
+            $payment = $lockedBooking->payment()->lockForUpdate()->firstOrFail();
+
+            $payment->update([
+                'payment_status' => $paymentStatus,
+                'midtrans_transaction_status' => $gatewayStatus,
+                'transaction_id' => $transaction['transaction_id'] ?? $payment->transaction_id,
+                'fraud_status' => $fraudStatus,
+                'settlement_time' => $settlementTime,
+            ]);
+
+            $update = [
+                'status' => $bookingStatus,
+                'midtrans_transaction_status' => $gatewayStatus,
+                'midtrans_transaction_id' => $transaction['transaction_id'] ?? $lockedBooking->midtrans_transaction_id,
+                'payment_type' => $transaction['payment_type'] ?? $lockedBooking->payment_type,
+                'paid_at' => $settlementTime,
+            ];
+
+            $shouldRelease = in_array($lockedBooking->status, self::ACTIVE_BOOKING_STATUSES, true)
+                && in_array($bookingStatus, ['cancelled', 'refunded'], true)
+                && $lockedBooking->capacity_released_at === null;
+
+            if ($shouldRelease) {
+                $flight = Flight::query()->lockForUpdate()->find($lockedBooking->flight_id);
+                $flight?->increment('available_seats', (int) $lockedBooking->total_passengers);
+                $update['capacity_released_at'] = now();
+            }
+
+            $lockedBooking->update($update);
+        }, 3);
+    }
+
+    private function paymentCount(int $userId, array $statuses): int
+    {
+        return Booking::where('user_id', $userId)
+            ->whereHas('payment', fn ($query) => $query->whereIn('payment_status', $statuses))
+            ->count();
+    }
+
+    private function authorizeBooking(Booking $booking): void
     {
         if ($booking->user_id !== auth()->id()) {
             abort(403);
         }
-
-        if ($booking->status !== 'issued' && $booking->status !== 'paid') {
-            return back()->with('error', 'E-Ticket hanya tersedia untuk booking yang sudah dikonfirmasi.');
-        }
-
-        $booking->load(['flight.departureAirport', 'flight.arrivalAirport', 'flight.airline', 'flight.airplane', 'passengers', 'payment']);
-        return view('customer.bookings.eticket', compact('booking'));
     }
 }

@@ -17,9 +17,9 @@ class MidtransService
     private function configureMidtrans(): void
     {
         Config::$serverKey = config('midtrans.server_key');
-        Config::$isProduction = config('midtrans.is_production');
-        Config::$isSanitized = config('midtrans.is_sanitized');
-        Config::$is3ds = config('midtrans.is_3ds');
+        Config::$isProduction = (bool) config('midtrans.is_production');
+        Config::$isSanitized = (bool) config('midtrans.is_sanitized');
+        Config::$is3ds = (bool) config('midtrans.is_3ds');
         Config::$clientKey = config('midtrans.client_key');
     }
 
@@ -27,29 +27,69 @@ class MidtransService
     {
         try {
             return Snap::getSnapToken($payload);
-        } catch (\Exception $e) {
-            Log::error('Midtrans Snap Token Error: ' . $e->getMessage());
-            throw new \RuntimeException('Failed to create payment token. Please try again.');
+        } catch (\Throwable $exception) {
+            Log::error('Midtrans Snap Token Error', ['message' => $exception->getMessage()]);
+            throw new \RuntimeException('Failed to create payment token. Please try again.', previous: $exception);
         }
     }
 
     public function verifyCallbackSignature(array $data): bool
     {
-        $serverKey = config('midtrans.server_key');
-        $signatureKey = hash('sha512', $data['order_id'] . $data['status_code'] . $data['gross_amount'] . $serverKey);
+        $required = ['order_id', 'status_code', 'gross_amount', 'signature_key'];
 
-        return $signatureKey === $data['signature_key'];
+        foreach ($required as $field) {
+            if (! isset($data[$field]) || ! is_scalar($data[$field])) {
+                return false;
+            }
+        }
+
+        $serverKey = (string) config('midtrans.server_key');
+
+        if ($serverKey === '') {
+            return false;
+        }
+
+        $expected = hash(
+            'sha512',
+            (string) $data['order_id']
+            . (string) $data['status_code']
+            . (string) $data['gross_amount']
+            . $serverKey
+        );
+
+        return hash_equals($expected, (string) $data['signature_key']);
     }
 
     public function getTransactionStatus(string $orderId): array
     {
-        try {
-            $response = Http::withBasicAuth(config('midtrans.server_key'), '')
-                ->get("https://api.midtrans.com/v2/{$orderId}/status");
+        $baseUrl = config('midtrans.is_production')
+            ? 'https://api.midtrans.com'
+            : 'https://api.sandbox.midtrans.com';
 
-            return $response->json();
-        } catch (\Exception $e) {
-            Log::error('Midtrans Status Check Error: ' . $e->getMessage());
+        try {
+            $response = Http::withBasicAuth((string) config('midtrans.server_key'), '')
+                ->acceptJson()
+                ->timeout(15)
+                ->retry(2, 300)
+                ->get($baseUrl . '/v2/' . rawurlencode($orderId) . '/status');
+
+            if ($response->failed()) {
+                Log::warning('Midtrans Status Check Failed', [
+                    'order_id' => $orderId,
+                    'http_status' => $response->status(),
+                    'response' => $response->json(),
+                ]);
+
+                return [];
+            }
+
+            return $response->json() ?? [];
+        } catch (\Throwable $exception) {
+            Log::error('Midtrans Status Check Error', [
+                'order_id' => $orderId,
+                'message' => $exception->getMessage(),
+            ]);
+
             return [];
         }
     }

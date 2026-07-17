@@ -13,9 +13,10 @@ class Booking extends Model
 
     protected $casts = [
         'paid_at' => 'datetime',
+        'capacity_released_at' => 'datetime',
         'total_price' => 'decimal:2',
     ];
-    
+
     public function getCabinClassLabelAttribute(): string
     {
         return match ($this->cabin_class) {
@@ -24,7 +25,7 @@ class Booking extends Model
             default => 'Economy Class',
         };
     }
-    
+
     public function getCabinClassIconAttribute(): string
     {
         return match ($this->cabin_class) {
@@ -33,7 +34,7 @@ class Booking extends Model
             default => 'fa-chair',
         };
     }
-    
+
     public function getCabinClassColorAttribute(): string
     {
         return match ($this->cabin_class) {
@@ -43,26 +44,38 @@ class Booking extends Model
         };
     }
 
-    public function user(): BelongsTo { return $this->belongsTo(User::class); }
-    public function flight(): BelongsTo { return $this->belongsTo(Flight::class); }
-    public function passengers(): HasMany { return $this->hasMany(Passenger::class); }
-    public function payment(): HasOne { return $this->hasOne(Payment::class); }
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
 
-    // Scope for pending bookings
+    public function flight(): BelongsTo
+    {
+        return $this->belongsTo(Flight::class);
+    }
+
+    public function passengers(): HasMany
+    {
+        return $this->hasMany(Passenger::class);
+    }
+
+    public function payment(): HasOne
+    {
+        return $this->hasOne(Payment::class);
+    }
+
     public function scopePending($query)
     {
         return $query->where('status', 'pending');
     }
 
-    // Scope for paid/issued bookings
     public function scopeConfirmed($query)
     {
         return $query->whereIn('status', ['paid', 'issued']);
     }
 
-    // Scope for cancelled bookings
     public function scopeCancelled($query)
     {
-        return $query->where('status', 'cancelled');
+        return $query->whereIn('status', ['cancelled', 'refunded']);
     }
 }
