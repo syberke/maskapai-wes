@@ -70,6 +70,8 @@ Route::middleware(['auth', 'verified', 'role:staff'])->prefix('staff')->name('st
     Route::get('/dashboard', [StaffDashboardController::class, 'index'])->name('dashboard');
     Route::get('/manifest', [ManifestController::class, 'index'])->name('manifest');
     Route::get('/manifest/{flight}', [ManifestController::class, 'show'])->name('manifest.show');
+    Route::get('/manifest/{flight}/pdf', [ManifestController::class, 'pdf'])->name('manifest.pdf');
+    Route::get('/manifest/{flight}/excel', [ManifestController::class, 'excel'])->name('manifest.excel');
     Route::get('/flights', [FlightMonitoringController::class, 'index'])->name('flights');
 });
 
