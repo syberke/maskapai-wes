@@ -21,6 +21,7 @@ use App\Http\Controllers\Customer\DashboardController as CustomerDashboardContro
 use App\Http\Controllers\Customer\BookingController;
 use App\Http\Controllers\Customer\PaymentController;
 use App\Http\Controllers\Customer\MidtransController;
+use App\Http\Controllers\Customer\EticketController;
 
 use App\Http\Controllers\Staff\DashboardController as StaffDashboardController;
 use App\Http\Controllers\Staff\ManifestController;
@@ -45,6 +46,7 @@ Route::middleware(['auth', 'verified'])->prefix('customer')->name('customer.')->
     Route::post('/payments/{booking}/process', [PaymentController::class, 'process'])->name('payment.process');
     Route::get('/payments/{booking}/success', [PaymentController::class, 'success'])->name('payment.success');
     Route::get('/eticket/{booking}', [PaymentController::class, 'eticket'])->name('eticket');
+    Route::get('/eticket/{booking}/pdf', [EticketController::class, 'pdf'])->name('eticket.pdf');
     Route::post('/midtrans/pay/{booking}', [MidtransController::class, 'pay'])->name('midtrans.pay');
     Route::post('/midtrans/callback', [MidtransController::class, 'callback'])->name('midtrans.callback');
 });
