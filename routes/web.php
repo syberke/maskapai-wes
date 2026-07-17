@@ -45,7 +45,7 @@ Route::middleware(['auth', 'verified'])->prefix('customer')->name('customer.')->
     Route::get('/payments/{booking}', [PaymentController::class, 'show'])->name('payment.show');
     Route::post('/payments/{booking}/process', [PaymentController::class, 'process'])->name('payment.process');
     Route::get('/payments/{booking}/success', [PaymentController::class, 'success'])->name('payment.success');
-    Route::get('/eticket/{booking}', [PaymentController::class, 'eticket'])->name('eticket');
+    Route::get('/eticket/{booking}', [EticketController::class, 'show'])->name('eticket');
     Route::get('/eticket/{booking}/pdf', [EticketController::class, 'pdf'])->name('eticket.pdf');
     Route::post('/midtrans/pay/{booking}', [MidtransController::class, 'pay'])->name('midtrans.pay');
     Route::post('/midtrans/callback', [MidtransController::class, 'callback'])->name('midtrans.callback');
